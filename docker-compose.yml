@@ -5,17 +5,23 @@ services:
   # TRAEFIK REVERSE PROXY
   # --------------------------
   traefik:
-    image: traefik:v2.10
+    image: traefik:v2.9
     container_name: traefik
     command:
-      - --configFile=/traefik/traefik.yml
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.myresolver.acme.email=nworjiifeanyi@gmail.com"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik/traefik.yml:/traefik/traefik.yml:ro
-      - ./traefik/acme.json:/letsencrypt/acme.json
+      - traefik-certs:/letsencrypt
     networks:
       - app-network
 
@@ -29,16 +35,18 @@ services:
     container_name: frontend
     env_file:
       - .env
+    expose:
+      - "8080"  # internal port
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=Host(`anyitech.duckdns.org`)"
       - "traefik.http.routers.frontend.entrypoints=websecure"
-      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.frontend.tls.certresolver=myresolver"
+    networks:
+      - app-network
     depends_on:
       - auth-api
       - todos-api
-    networks:
-      - app-network
 
   # --------------------------
   # AUTH API
@@ -50,16 +58,18 @@ services:
     container_name: auth-api
     env_file:
       - .env
+    expose:
+      - "8081"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.auth.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/auth`)"
-      - "traefik.http.routers.auth.entrypoints=websecure"
-      - "traefik.http.routers.auth.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.auth-api.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.auth-api.entrypoints=websecure"
+      - "traefik.http.routers.auth-api.tls.certresolver=myresolver"
+    networks:
+      - app-network
     depends_on:
       - users-api
       - redis-queue
-    networks:
-      - app-network
 
   # --------------------------
   # TODOS API
@@ -71,16 +81,18 @@ services:
     container_name: todos-api
     env_file:
       - .env
+    expose:
+      - "8082"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.todos.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/todos`)"
-      - "traefik.http.routers.todos.entrypoints=websecure"
-      - "traefik.http.routers.todos.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.todos-api.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/todos`)"
+      - "traefik.http.routers.todos-api.entrypoints=websecure"
+      - "traefik.http.routers.todos-api.tls.certresolver=myresolver"
+    networks:
+      - app-network
     depends_on:
       - redis-queue
       - auth-api
-    networks:
-      - app-network
 
   # --------------------------
   # USERS API
@@ -92,11 +104,13 @@ services:
     container_name: users-api
     env_file:
       - .env
+    expose:
+      - "8083"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.users.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/users`)"
-      - "traefik.http.routers.users.entrypoints=websecure"
-      - "traefik.http.routers.users.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.users-api.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/users`)"
+      - "traefik.http.routers.users-api.entrypoints=websecure"
+      - "traefik.http.routers.users-api.tls.certresolver=myresolver"
     networks:
       - app-network
 
@@ -110,10 +124,10 @@ services:
     container_name: log-message-processor
     env_file:
       - .env
-    depends_on:
-      - redis-queue
     networks:
       - app-network
+    depends_on:
+      - redis-queue
 
   # --------------------------
   # REDIS QUEUE
@@ -126,6 +140,9 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     networks:
       - app-network
+
+volumes:
+  traefik-certs:
 
 networks:
   app-network:

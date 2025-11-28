@@ -1,4 +1,4 @@
-# Stage 1: Build the application
+# Stage 1: Build the Vue app
 FROM node:12-buster AS builder
 
 WORKDIR /app
@@ -16,18 +16,20 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-# Stage 2: Serve with Nginx on port 8080
+# Stage 2: Serve the application with Nginx
 FROM nginx:alpine
 
-# remove default nginx html
+# Remove default HTML
 RUN rm -rf /usr/share/nginx/html/*
 
-# copy build files
+# Copy build files
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Replace default server config
+# Copy custom Nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 8080
+# Expose the internal port as defined in .env (8080)
+ENV PORT=8080
+EXPOSE ${PORT}
 
 CMD ["nginx", "-g", "daemon off;"]

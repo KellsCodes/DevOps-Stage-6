@@ -1,20 +1,20 @@
+# traefik.yml - Static configuration
 entryPoints:
   web:
     address: ":80"
   websecure:
     address: ":443"
 
-api:
-  dashboard: true
-  insecure: false
-
 providers:
   docker:
     endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
 
+api:
+  dashboard: true
+
 certificatesResolvers:
-  letsencrypt:
+  myresolver:
     acme:
       email: nworjiifeanyi@gmail.com
       storage: /letsencrypt/acme.json
