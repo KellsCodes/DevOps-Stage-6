@@ -1,9 +1,27 @@
 version: "3.9"
 
 services:
-  # ---------------------------------------------------
-  # FRONTEND (Nginx serving built Vue app on port 80)
-  # ---------------------------------------------------
+  # --------------------------
+  # TRAEFIK REVERSE PROXY
+  # --------------------------
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    command:
+      - --configFile=/traefik/traefik.yml
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik/traefik.yml:ro
+      - ./traefik/acme.json:/letsencrypt/acme.json
+    networks:
+      - app-network
+
+  # --------------------------
+  # FRONTEND
+  # --------------------------
   frontend:
     build:
       context: ./frontend
@@ -11,17 +29,20 @@ services:
     container_name: frontend
     env_file:
       - .env
-    ports:
-      - "80:8080"     # external:internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`anyitech.duckdns.org`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
     depends_on:
       - auth-api
       - todos-api
     networks:
       - app-network
 
-  # ---------------------------------------------------
+  # --------------------------
   # AUTH API
-  # ---------------------------------------------------
+  # --------------------------
   auth-api:
     build:
       context: ./auth-api
@@ -29,20 +50,20 @@ services:
     container_name: auth-api
     env_file:
       - .env
-    ports:
-      - "8081:8081"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.auth.entrypoints=websecure"
+      - "traefik.http.routers.auth.tls.certresolver=letsencrypt"
     depends_on:
       - users-api
       - redis-queue
-      - log-message-processor
-    environment:
-      LOG_QUEUE_HOST: redis-queue
     networks:
       - app-network
 
-  # ---------------------------------------------------
+  # --------------------------
   # TODOS API
-  # ---------------------------------------------------
+  # --------------------------
   todos-api:
     build:
       context: ./todos-api
@@ -50,20 +71,20 @@ services:
     container_name: todos-api
     env_file:
       - .env
-    ports:
-      - "8082:8082"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.todos.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/todos`)"
+      - "traefik.http.routers.todos.entrypoints=websecure"
+      - "traefik.http.routers.todos.tls.certresolver=letsencrypt"
     depends_on:
       - redis-queue
       - auth-api
-      - log-message-processor
-    environment:
-      LOG_QUEUE_HOST: redis-queue
     networks:
       - app-network
 
-  # ---------------------------------------------------
+  # --------------------------
   # USERS API
-  # ---------------------------------------------------
+  # --------------------------
   users-api:
     build:
       context: ./users-api
@@ -71,18 +92,17 @@ services:
     container_name: users-api
     env_file:
       - .env
-    ports:
-      - "8083:8083"
-    depends_on:
-      - log-message-processor
-    environment:
-      LOG_QUEUE_HOST: redis-queue
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.users.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/users`)"
+      - "traefik.http.routers.users.entrypoints=websecure"
+      - "traefik.http.routers.users.tls.certresolver=letsencrypt"
     networks:
       - app-network
 
-  # ---------------------------------------------------
-  # LOG MESSAGE PROCESSOR
-  # ---------------------------------------------------
+  # --------------------------
+  # LOG PROCESSOR
+  # --------------------------
   log-message-processor:
     build:
       context: ./log-message-processor
@@ -92,14 +112,12 @@ services:
       - .env
     depends_on:
       - redis-queue
-    environment:
-      REDIS_HOST: redis-queue
     networks:
       - app-network
 
-  # ---------------------------------------------------
+  # --------------------------
   # REDIS QUEUE
-  # ---------------------------------------------------
+  # --------------------------
   redis-queue:
     image: redis:alpine
     container_name: redis-queue
