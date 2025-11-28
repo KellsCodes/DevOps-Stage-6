@@ -1,0 +1,114 @@
+version: "3.9"
+
+services:
+  # ---------------------------------------------------
+  # FRONTEND (Nginx serving built Vue app on port 80)
+  # ---------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    env_file:
+      - .env
+    ports:
+      - "80:8080"     # external:internal
+    depends_on:
+      - auth-api
+      - todos-api
+    networks:
+      - app-network
+
+  # ---------------------------------------------------
+  # AUTH API
+  # ---------------------------------------------------
+  auth-api:
+    build:
+      context: ./auth-api
+      dockerfile: Dockerfile
+    container_name: auth-api
+    env_file:
+      - .env
+    ports:
+      - "8081:8081"
+    depends_on:
+      - users-api
+      - redis-queue
+      - log-message-processor
+    environment:
+      LOG_QUEUE_HOST: redis-queue
+    networks:
+      - app-network
+
+  # ---------------------------------------------------
+  # TODOS API
+  # ---------------------------------------------------
+  todos-api:
+    build:
+      context: ./todos-api
+      dockerfile: Dockerfile
+    container_name: todos-api
+    env_file:
+      - .env
+    ports:
+      - "8082:8082"
+    depends_on:
+      - redis-queue
+      - auth-api
+      - log-message-processor
+    environment:
+      LOG_QUEUE_HOST: redis-queue
+    networks:
+      - app-network
+
+  # ---------------------------------------------------
+  # USERS API
+  # ---------------------------------------------------
+  users-api:
+    build:
+      context: ./users-api
+      dockerfile: Dockerfile
+    container_name: users-api
+    env_file:
+      - .env
+    ports:
+      - "8083:8083"
+    depends_on:
+      - log-message-processor
+    environment:
+      LOG_QUEUE_HOST: redis-queue
+    networks:
+      - app-network
+
+  # ---------------------------------------------------
+  # LOG MESSAGE PROCESSOR
+  # ---------------------------------------------------
+  log-message-processor:
+    build:
+      context: ./log-message-processor
+      dockerfile: Dockerfile
+    container_name: log-message-processor
+    env_file:
+      - .env
+    depends_on:
+      - redis-queue
+    environment:
+      REDIS_HOST: redis-queue
+    networks:
+      - app-network
+
+  # ---------------------------------------------------
+  # REDIS QUEUE
+  # ---------------------------------------------------
+  redis-queue:
+    image: redis:alpine
+    container_name: redis-queue
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
