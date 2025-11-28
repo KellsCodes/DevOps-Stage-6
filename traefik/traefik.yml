@@ -4,20 +4,19 @@ entryPoints:
   websecure:
     address: ":443"
 
+api:
+  dashboard: true
+  insecure: false
+
 providers:
   docker:
+    endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
-  file:
-    directory: /etc/traefik/dynamic
-    watch: true
 
 certificatesResolvers:
   letsencrypt:
     acme:
-      email: your-email@example.com
-      storage: /acme.json
+      email: nworjiifeanyi@gmail.com
+      storage: /letsencrypt/acme.json
       httpChallenge:
         entryPoint: web
-
-api:
-  dashboard: true
