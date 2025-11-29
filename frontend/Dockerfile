@@ -16,7 +16,7 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-# Stage 2: Serve the application with Nginx
+# Stage 2: Serve with Nginx on port 8080
 FROM nginx:alpine
 
 # Remove default HTML
@@ -28,8 +28,6 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # Copy custom Nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Expose the internal port as defined in .env (8080)
-ENV PORT=8080
-EXPOSE ${PORT}
+EXPOSE 8080
 
 CMD ["nginx", "-g", "daemon off;"]
