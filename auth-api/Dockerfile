@@ -24,7 +24,7 @@ WORKDIR /app
 
 COPY --from=builder /app/auth-api .
 
-EXPOSE 8000
+EXPOSE 8081
 
 # Use a non-root user to run the application
 USER appuser
