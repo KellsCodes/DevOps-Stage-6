@@ -3,9 +3,9 @@ FROM node:18-alpine AS build
 
 WORKDIR /app
 
-COPY package.json ./
+COPY package.json package-lock.json ./
 
-RUN npm install --production
+RUN npm install
 
 COPY . .
 
@@ -16,6 +16,6 @@ WORKDIR /app
 
 COPY --from=build /app /app
 
-EXPOSE 9000
+EXPOSE 8082
 
 CMD ["npm", "start"]
