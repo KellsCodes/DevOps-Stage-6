@@ -3,38 +3,21 @@ networks:
     driver: bridge
 
 services:
-  # Docker Socket Proxy for Traefik
-  docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy
-    container_name: docker-socket-proxy
-    environment:
-      - CONTAINERS=1
-      - NETWORKS=1
-      - SERVICES=1
-      - TASKS=1
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - app-network
-
   # Traefik Reverse Proxy
   traefik:
     image: traefik:v2.11
     container_name: traefik
     restart: always
+    command:
+      - "--configFile=/traefik.yml"
     ports:
       - "80:80"
       - "443:443"
       - "8080:8080"
     volumes:
       - ./traefik/letsencrypt:/letsencrypt
-      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
-      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
-    depends_on:
-      - docker-socket-proxy
-    environment:
-      - TRAEFIK_PROVIDERS_DOCKER_ENDPOINT=unix:///var/run/docker.sock
-      - TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT=false
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - app-network
     labels:
@@ -57,17 +40,18 @@ services:
       - users-api
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`anyitech.duckdns.org`)"
-      - "traefik.http.routers.frontend.entrypoints=websecure"
-      - "traefik.http.routers.frontend.tls=true"
+      # Frontend ONLY handles root path and non-API routes
+      - "traefik.http.routers.frontend.rule=Host(`anyitech.duckdns.org`) && !PathPrefix(`/api`)"
+      - "traefik.http.routers.frontend.entrypoints=web,websecure"
       - "traefik.http.routers.frontend.tls.certresolver=le"
-      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.routers.frontend.priority=10"
       - "traefik.http.services.frontend.loadbalancer.server.port=8080"
-      # HTTP to HTTPS redirect
-      - "traefik.http.routers.frontend-http.rule=Host(`anyitech.duckdns.org`)"
+      # HTTP to HTTPS redirect for frontend
+      - "traefik.http.routers.frontend-http.rule=Host(`anyitech.duckdns.org`) && !PathPrefix(`/api`)"
       - "traefik.http.routers.frontend-http.entrypoints=web"
       - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
       - "traefik.http.routers.frontend-http.middlewares=https-redirect"
+      - "traefik.http.routers.frontend-http.priority=10"
 
   # Auth API - Go
   auth-api:
@@ -86,15 +70,20 @@ services:
       - redis-queue
     labels:
       - "traefik.enable=true"
+      # Auth API ONLY handles /api/auth paths
       - "traefik.http.routers.auth.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/auth`)"
-      - "traefik.http.routers.auth.entrypoints=websecure"
-      - "traefik.http.routers.auth.tls=true"
+      - "traefik.http.routers.auth.entrypoints=web,websecure"
       - "traefik.http.routers.auth.tls.certresolver=le"
       - "traefik.http.routers.auth.priority=100"
-      # Strip /api/auth before routing to backend
+      # Strip /api/auth prefix before sending to backend
       - "traefik.http.middlewares.auth-stripprefix.stripprefix.prefixes=/api/auth"
       - "traefik.http.routers.auth.middlewares=auth-stripprefix"
       - "traefik.http.services.auth.loadbalancer.server.port=8081"
+      # HTTP to HTTPS redirect for auth
+      - "traefik.http.routers.auth-http.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.auth-http.entrypoints=web"
+      - "traefik.http.routers.auth-http.middlewares=https-redirect"
+      - "traefik.http.routers.auth-http.priority=100"
 
   # Todos API - Node.js
   todos-api:
@@ -112,18 +101,22 @@ services:
       - app-network
     depends_on:
       - redis-queue
-      - auth-api
     labels:
       - "traefik.enable=true"
+      # Todos API ONLY handles /api/todos paths
       - "traefik.http.routers.todos.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/todos`)"
-      - "traefik.http.routers.todos.entrypoints=websecure"
-      - "traefik.http.routers.todos.tls=true"
+      - "traefik.http.routers.todos.entrypoints=web,websecure"
       - "traefik.http.routers.todos.tls.certresolver=le"
       - "traefik.http.routers.todos.priority=100"
-      # Strip /api/todos before routing to backend
+      # Strip /api/todos prefix before sending to backend
       - "traefik.http.middlewares.todos-stripprefix.stripprefix.prefixes=/api/todos"
       - "traefik.http.routers.todos.middlewares=todos-stripprefix"
       - "traefik.http.services.todos.loadbalancer.server.port=8082"
+      # HTTP to HTTPS redirect for todos
+      - "traefik.http.routers.todos-http.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/todos`)"
+      - "traefik.http.routers.todos-http.entrypoints=web"
+      - "traefik.http.routers.todos-http.middlewares=https-redirect"
+      - "traefik.http.routers.todos-http.priority=100"
 
   # Users API - Java Spring Boot
   users-api:
@@ -141,15 +134,20 @@ services:
       - app-network
     labels:
       - "traefik.enable=true"
+      # Users API ONLY handles /api/users paths
       - "traefik.http.routers.users.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/users`)"
-      - "traefik.http.routers.users.entrypoints=websecure"
-      - "traefik.http.routers.users.tls=true"
+      - "traefik.http.routers.users.entrypoints=web,websecure"
       - "traefik.http.routers.users.tls.certresolver=le"
       - "traefik.http.routers.users.priority=100"
-      # Strip /api/users before routing to backend
+      # Strip /api/users prefix before sending to backend
       - "traefik.http.middlewares.users-stripprefix.stripprefix.prefixes=/api/users"
       - "traefik.http.routers.users.middlewares=users-stripprefix"
       - "traefik.http.services.users.loadbalancer.server.port=8083"
+      # HTTP to HTTPS redirect for users
+      - "traefik.http.routers.users-http.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/users`)"
+      - "traefik.http.routers.users-http.entrypoints=web"
+      - "traefik.http.routers.users-http.middlewares=https-redirect"
+      - "traefik.http.routers.users-http.priority=100"
 
   # Log Message Processor - Python
   log-message-processor:
