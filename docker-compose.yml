@@ -20,8 +20,44 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - app-network
+    environment:
+      - TRAEFIK_API_INSECURE=true
+      - TRAEFIK_API_DEBUG=true
+
+  # Zipkin - Distributed Tracing
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: zipkin
+    restart: always
+    ports:
+      - "9411:9411"
+    networks:
+      - app-network
+    environment:
+      - STORAGE_TYPE=mem
     labels:
       - "traefik.enable=true"
+      - "traefik.http.routers.zipkin.rule=Host(`anyitech.duckdns.org`) && Path(`/zipkin`) || Host(`anyitech.duckdns.org`) && PathPrefix(`/zipkin/`)"
+      - "traefik.http.routers.zipkin.entrypoints=web,websecure"
+      - "traefik.http.routers.zipkin.tls.certresolver=le"
+      - "traefik.http.routers.zipkin.priority=40"
+      # Simple path replacement: /zipkin -> /api/v2/spans
+      - "traefik.http.middlewares.zipkin-path.replacepath.path=/api/v2/spans"
+      - "traefik.http.routers.zipkin.middlewares=zipkin-path"
+      - "traefik.http.services.zipkin.loadbalancer.server.port=9411"
+
+  # Redis Queue
+  redis-queue:
+    image: redis:7-alpine
+    container_name: redis-queue
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
 
   # Frontend - Vue.js
   frontend:
@@ -30,28 +66,18 @@ services:
       dockerfile: Dockerfile
     container_name: frontend
     restart: always
-    env_file:
-      - .env
     networks:
       - app-network
     depends_on:
-      - auth-api
-      - todos-api
-      - users-api
+      - traefik
+      - zipkin
     labels:
       - "traefik.enable=true"
-      # Frontend ONLY handles root path and non-API routes
-      - "traefik.http.routers.frontend.rule=Host(`anyitech.duckdns.org`) && !PathPrefix(`/api`)"
+      - "traefik.http.routers.frontend.rule=Host(`anyitech.duckdns.org`) && !PathPrefix(`/api`, `/zipkin`)"
       - "traefik.http.routers.frontend.entrypoints=web,websecure"
       - "traefik.http.routers.frontend.tls.certresolver=le"
-      - "traefik.http.routers.frontend.priority=10"
+      - "traefik.http.routers.frontend.priority=100"
       - "traefik.http.services.frontend.loadbalancer.server.port=8080"
-      # HTTP to HTTPS redirect for frontend
-      - "traefik.http.routers.frontend-http.rule=Host(`anyitech.duckdns.org`) && !PathPrefix(`/api`)"
-      - "traefik.http.routers.frontend-http.entrypoints=web"
-      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
-      - "traefik.http.routers.frontend-http.middlewares=https-redirect"
-      - "traefik.http.routers.frontend-http.priority=10"
 
   # Auth API - Go
   auth-api:
@@ -60,30 +86,24 @@ services:
       dockerfile: Dockerfile
     container_name: auth-api
     restart: always
-    env_file:
-      - .env
     environment:
-      - PORT=8081
+      - AUTH_API_PORT=8081
+      - JWT_SECRET=${JWT_SECRET:-myfancysecret}
+      - USERS_API_ADDRESS=http://users-api:8083
+      - ZIPKIN_URL=${ZIPKIN_URL:-}
     networks:
       - app-network
     depends_on:
-      - redis-queue
+      - traefik
     labels:
       - "traefik.enable=true"
-      # Auth API ONLY handles /api/auth paths
-      - "traefik.http.routers.auth.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/auth`)"
-      - "traefik.http.routers.auth.entrypoints=web,websecure"
-      - "traefik.http.routers.auth.tls.certresolver=le"
-      - "traefik.http.routers.auth.priority=100"
-      # Strip /api/auth prefix before sending to backend
-      - "traefik.http.middlewares.auth-stripprefix.stripprefix.prefixes=/api/auth"
-      - "traefik.http.routers.auth.middlewares=auth-stripprefix"
-      - "traefik.http.services.auth.loadbalancer.server.port=8081"
-      # HTTP to HTTPS redirect for auth
-      - "traefik.http.routers.auth-http.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/auth`)"
-      - "traefik.http.routers.auth-http.entrypoints=web"
-      - "traefik.http.routers.auth-http.middlewares=https-redirect"
-      - "traefik.http.routers.auth-http.priority=100"
+      - "traefik.http.routers.auth-api.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.auth-api.entrypoints=web,websecure"
+      - "traefik.http.routers.auth-api.tls.certresolver=le"
+      - "traefik.http.routers.auth-api.priority=50"
+      - "traefik.http.middlewares.auth-api-strip.stripprefix.prefixes=/api/auth"
+      - "traefik.http.routers.auth-api.middlewares=auth-api-strip"
+      - "traefik.http.services.auth-api.loadbalancer.server.port=8081"
 
   # Todos API - Node.js
   todos-api:
@@ -92,31 +112,26 @@ services:
       dockerfile: Dockerfile
     container_name: todos-api
     restart: always
-    env_file:
-      - .env
     environment:
       - PORT=8082
-      - REDIS_URL=redis://redis-queue:6379
+      - JWT_SECRET=${JWT_SECRET:-myfancysecret}
+      - REDIS_HOST=redis-queue
+      - REDIS_PORT=6379
+      - REDIS_CHANNEL=log_channel
     networks:
       - app-network
     depends_on:
+      - traefik
       - redis-queue
     labels:
       - "traefik.enable=true"
-      # Todos API ONLY handles /api/todos paths
-      - "traefik.http.routers.todos.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/todos`)"
-      - "traefik.http.routers.todos.entrypoints=web,websecure"
-      - "traefik.http.routers.todos.tls.certresolver=le"
-      - "traefik.http.routers.todos.priority=100"
-      # Strip /api/todos prefix before sending to backend
-      - "traefik.http.middlewares.todos-stripprefix.stripprefix.prefixes=/api/todos"
-      - "traefik.http.routers.todos.middlewares=todos-stripprefix"
-      - "traefik.http.services.todos.loadbalancer.server.port=8082"
-      # HTTP to HTTPS redirect for todos
-      - "traefik.http.routers.todos-http.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/todos`)"
-      - "traefik.http.routers.todos-http.entrypoints=web"
-      - "traefik.http.routers.todos-http.middlewares=https-redirect"
-      - "traefik.http.routers.todos-http.priority=100"
+      - "traefik.http.routers.todos-api.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/todos`)"
+      - "traefik.http.routers.todos-api.entrypoints=web,websecure"
+      - "traefik.http.routers.todos-api.tls.certresolver=le"
+      - "traefik.http.routers.todos-api.priority=50"
+      - "traefik.http.middlewares.todos-api-strip.stripprefix.prefixes=/api/todos"
+      - "traefik.http.routers.todos-api.middlewares=todos-api-strip"
+      - "traefik.http.services.todos-api.loadbalancer.server.port=8082"
 
   # Users API - Java Spring Boot
   users-api:
@@ -125,29 +140,22 @@ services:
       dockerfile: Dockerfile
     container_name: users-api
     restart: always
-    env_file:
-      - .env
     environment:
       - SERVER_PORT=8083
-      - SPRING_PROFILES_ACTIVE=production
+      - JWT_SECRET=${JWT_SECRET:-myfancysecret}
     networks:
       - app-network
+    depends_on:
+      - traefik
     labels:
       - "traefik.enable=true"
-      # Users API ONLY handles /api/users paths
-      - "traefik.http.routers.users.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/users`)"
-      - "traefik.http.routers.users.entrypoints=web,websecure"
-      - "traefik.http.routers.users.tls.certresolver=le"
-      - "traefik.http.routers.users.priority=100"
-      # Strip /api/users prefix before sending to backend
-      - "traefik.http.middlewares.users-stripprefix.stripprefix.prefixes=/api/users"
-      - "traefik.http.routers.users.middlewares=users-stripprefix"
-      - "traefik.http.services.users.loadbalancer.server.port=8083"
-      # HTTP to HTTPS redirect for users
-      - "traefik.http.routers.users-http.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/users`)"
-      - "traefik.http.routers.users-http.entrypoints=web"
-      - "traefik.http.routers.users-http.middlewares=https-redirect"
-      - "traefik.http.routers.users-http.priority=100"
+      - "traefik.http.routers.users-api.rule=Host(`anyitech.duckdns.org`) && PathPrefix(`/api/users`)"
+      - "traefik.http.routers.users-api.entrypoints=web,websecure"
+      - "traefik.http.routers.users-api.tls.certresolver=le"
+      - "traefik.http.routers.users-api.priority=50"
+      - "traefik.http.middlewares.users-api-strip.stripprefix.prefixes=/api/users"
+      - "traefik.http.routers.users-api.middlewares=users-api-strip"
+      - "traefik.http.services.users-api.loadbalancer.server.port=8083"
 
   # Log Message Processor - Python
   log-message-processor:
@@ -156,26 +164,16 @@ services:
       dockerfile: Dockerfile
     container_name: log-message-processor
     restart: always
-    env_file:
-      - .env
+    environment:
+      - REDIS_HOST=redis-queue
+      - REDIS_PORT=6379
+      - REDIS_CHANNEL=log_channel
+      - ZIPKIN_URL=http://zipkin:9411/api/v2/spans
     networks:
       - app-network
     depends_on:
       - redis-queue
-
-  # Redis Queue
-  redis-queue:
-    image: redis:7-alpine
-    container_name: redis-queue
-    restart: always
-    expose:
-      - "6379"
-    networks:
-      - app-network
-    volumes:
-      - redis-data:/data
-    command: redis-server --appendonly yes
+      - zipkin
 
 volumes:
-  redis-data:
-    driver: local
+  redis-data

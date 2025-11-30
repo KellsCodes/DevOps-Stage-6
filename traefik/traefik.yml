@@ -1,28 +1,32 @@
+# API Configuration
 api:
   insecure: true
   dashboard: true
+  debug: true
 
+# Entrypoints
 entryPoints:
   web:
-    address: :80
+    address: ":80"
     http:
       redirections:
-        entryPoint:
+        entrypoint:
+          to: websecure
           scheme: https
-          permanent: true
-
   websecure:
-    address: :443
-    http:
-      tls:
-        certResolver: le
+    address: ":443"
 
+# Providers
 providers:
   docker:
-    endpoint: unix:///var/run/docker.sock
+    endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
+    network: app-network
+  file:
+    filename: /traefik.yml
     watch: true
 
+# Certificate Resolvers (Let's Encrypt)
 certificatesResolvers:
   le:
     acme:
@@ -30,6 +34,20 @@ certificatesResolvers:
       storage: /letsencrypt/acme.json
       httpChallenge:
         entryPoint: web
+      # Uncomment for production (has rate limits)
+      # caServer: https://acme-v02.api.letsencrypt.org/directory
+      # For testing/development (no rate limits):
+      caServer: https://acme-staging-v02.api.letsencrypt.org/directory
 
+# Global Configuration
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+# Logging
 log:
-  level: INFO
+  level: DEBUG
+  filePath: /var/log/traefik/traefik.log
+
+accessLog:
+  filePath: /var/log/traefik/access.log
