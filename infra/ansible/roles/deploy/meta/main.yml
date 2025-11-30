@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  author: AnyiTech DevOps Team
+  description: Deploy DevOps Stage 6 application with docker-compose
+  company: HNG
+  license: MIT
+  min_ansible_version: 2.9
+  
+  platforms:
+    - name: Ubuntu
+      versions:
+        - focal
+        - jammy
+
+dependencies:
+  - dependencies

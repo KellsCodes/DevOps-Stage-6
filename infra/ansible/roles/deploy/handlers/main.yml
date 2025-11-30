@@ -1,0 +1,6 @@
+---
+- name: restart docker-compose
+  shell: |
+    cd /home/ubuntu/apps/DevOps-Stage-6
+    docker compose restart
+  become_user: ubuntu

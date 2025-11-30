@@ -1,0 +1,133 @@
+---
+- name: Clone DevOps Stage 6 repository
+  git:
+    repo: https://github.com/KellsCodes/DevOps-Stage-6.git
+    dest: /home/ubuntu/apps/DevOps-Stage-6
+    version: main
+    update: yes
+  become_user: ubuntu
+  tags: git-clone
+  register: git_clone_result
+
+- name: Pull latest changes from repository
+  shell: |
+    cd /home/ubuntu/apps/DevOps-Stage-6
+    git pull origin main
+  become_user: ubuntu
+  tags: git-pull
+  ignore_errors: yes
+
+- name: Check if .env file exists
+  stat:
+    path: /home/ubuntu/apps/DevOps-Stage-6/.env
+  register: env_file_stat
+  tags: env-config
+
+- name: Create .env file if it doesn't exist
+  copy:
+    content: |
+      # Frontend
+      PORT=8080
+      AUTH_API_ADDRESS=http://auth-api:8081
+      TODOS_API_ADDRESS=http://todos-api:8082
+
+      # Auth API
+      AUTH_API_PORT=8081
+      JWT_SECRET=myfancysecret
+      USERS_API_ADDRESS=http://users-api:8083
+
+      # Todos API
+      JWT_SECRET=myfancysecret
+      REDIS_HOST=redis-queue
+      REDIS_PORT=6379
+      REDIS_CHANNEL=log_channel
+
+      # Users API
+      SERVER_PORT=8083
+      JWT_SECRET=myfancysecret
+
+      # Log Message Processor
+      REDIS_HOST=redis-queue
+      REDIS_PORT=6379
+      REDIS_CHANNEL=log_channel
+    dest: /home/ubuntu/apps/DevOps-Stage-6/.env
+    owner: ubuntu
+    group: ubuntu
+    mode: '0644'
+  when: not env_file_stat.stat.exists
+  tags: env-config
+
+- name: Stop existing Docker Compose services
+  shell: |
+    cd /home/ubuntu/apps/DevOps-Stage-6
+    docker compose down || true
+  become_user: ubuntu
+  tags: docker-compose-stop
+  ignore_errors: yes
+
+- name: Wait for services to stop
+  pause:
+    seconds: 5
+  tags: docker-compose-stop
+
+- name: Start Docker Compose services
+  shell: |
+    cd /home/ubuntu/apps/DevOps-Stage-6
+    docker compose up -d
+  become_user: ubuntu
+  tags: docker-compose-start
+  register: docker_compose_start
+  retries: 3
+  delay: 10
+  until: docker_compose_start is succeeded
+
+- name: Wait for services to be healthy
+  pause:
+    seconds: 30
+  tags: docker-compose-start
+
+- name: Check docker-compose status
+  shell: |
+    cd /home/ubuntu/apps/DevOps-Stage-6
+    docker compose ps
+  become_user: ubuntu
+  register: docker_compose_status
+  tags: docker-compose-status
+
+- name: Display docker-compose status
+  debug:
+    msg: "{{ docker_compose_status.stdout }}"
+  tags: docker-compose-status
+
+- name: Check frontend health
+  uri:
+    url: "https://anyitech.duckdns.org/"
+    method: GET
+    validate_certs: no
+    status_code: 200
+  register: frontend_health
+  retries: 5
+  delay: 10
+  until: frontend_health is succeeded
+  tags: health-check
+  ignore_errors: yes
+
+- name: Display health check result
+  debug:
+    msg: "Frontend is healthy - Response code: {{ frontend_health.status }}"
+  tags: health-check
+  when: frontend_health is succeeded
+
+- name: Display deployment summary
+  debug:
+    msg: |
+      ========================================
+      Application Deployment Complete!
+      ========================================
+      Repository: https://github.com/KellsCodes/DevOps-Stage-6.git
+      Deployment Path: /home/ubuntu/apps/DevOps-Stage-6
+      Services Status: Running
+      Frontend URL: https://anyitech.duckdns.org
+      Login: admin / Admin123
+      ========================================
+  tags: always

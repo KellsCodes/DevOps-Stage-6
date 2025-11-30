@@ -1,0 +1,151 @@
+---
+- name: Install system dependencies
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - wget
+      - git
+      - vim
+      - net-tools
+      - htop
+    state: present
+    update_cache: yes
+  tags: dependencies
+
+- name: Add Docker GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+  tags: docker
+
+- name: Add Docker repository
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+    filename: docker
+  tags: docker
+
+- name: Install Docker
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+  tags: docker
+  notify: start docker
+
+- name: Install Docker Compose (standalone)
+  shell: |
+    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+  args:
+    creates: /usr/local/bin/docker-compose
+  tags: docker-compose
+
+- name: Verify Docker Compose installation
+  shell: docker-compose --version
+  register: docker_compose_version
+  tags: docker-compose
+
+- name: Display Docker Compose version
+  debug:
+    msg: "{{ docker_compose_version.stdout }}"
+  tags: docker-compose
+
+- name: Add ubuntu user to docker group
+  user:
+    name: ubuntu
+    groups: docker
+    append: yes
+  tags: docker
+
+- name: Create docker systemd directory
+  file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+  tags: docker
+
+- name: Configure Docker daemon
+  copy:
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/dockerd -H fd:// --storage-driver overlay2
+    dest: /etc/docker/daemon.json
+  notify: restart docker
+  tags: docker
+
+- name: Enable Docker service
+  systemd:
+    name: docker
+    enabled: yes
+    state: started
+  tags: docker
+
+- name: Verify Git installation
+  shell: git --version
+  register: git_version
+  tags: git
+
+- name: Display Git version
+  debug:
+    msg: "{{ git_version.stdout }}"
+  tags: git
+
+- name: Configure git global settings
+  shell: |
+    git config --global init.defaultBranch main
+    git config --global user.email "devops@stage6.local"
+    git config --global user.name "DevOps Stage 6"
+  become_user: ubuntu
+  tags: git
+
+- name: Set vm.overcommit_memory for Redis
+  sysctl:
+    name: vm.overcommit_memory
+    value: '1'
+    state: present
+  tags: system-config
+
+- name: Increase file descriptors limit
+  lineinfile:
+    path: /etc/security/limits.conf
+    line: "* soft nofile 65536"
+    state: present
+  tags: system-config
+
+- name: Increase file descriptors limit (hard)
+  lineinfile:
+    path: /etc/security/limits.conf
+    line: "* hard nofile 65536"
+    state: present
+  tags: system-config
+
+- name: Create app directory
+  file:
+    path: /home/ubuntu/apps
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: '0755'
+  tags: app-dir
+
+- name: Display dependencies installation summary
+  debug:
+    msg: |
+      ========================================
+      Dependencies Installation Complete
+      ========================================
+      Docker: Installed
+      Docker Compose: Installed
+      Git: Installed
+      System optimizations: Applied
+      ========================================
+  tags: always

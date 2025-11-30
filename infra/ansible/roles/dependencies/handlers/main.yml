@@ -1,0 +1,10 @@
+---
+- name: start docker
+  systemd:
+    name: docker
+    state: started
+
+- name: restart docker
+  systemd:
+    name: docker
+    state: restarted
