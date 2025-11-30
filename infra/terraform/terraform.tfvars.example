@@ -1,0 +1,7 @@
+aws_region           = "us-east-1"
+instance_type        = "t2.medium"
+instance_name        = "devops-stage-6-server"
+ssh_key_name         = "your-key-pair-name"  # Change this
+allowed_ssh_cidr     = "0.0.0.0/0"           # Change to your IP for security
+duckdns_domain       = "anyitech.duckdns.org" # Change this
+duckdns_token        = "your-duckdns-token"   # Get from https://www.duckdns.org
