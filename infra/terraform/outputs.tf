@@ -35,5 +35,15 @@ output "application_url" {
 
 output "ssh_command" {
   description = "SSH command to connect to the instance"
-  value       = "ssh -i /path/to/${var.ssh_key_name}.pem ubuntu@${aws_eip.devops.public_ip}"
+  value       = "ssh -i ~/.ssh/${var.ssh_key_name}.pem ubuntu@${aws_eip.devops.public_ip}"
+}
+
+output "ansible_inventory_file" {
+  description = "Path to generated Ansible inventory file"
+  value       = "${path.module}/../ansible/inventory.ini"
+}
+
+output "ansible_playbook_command" {
+  description = "Command to run Ansible playbook manually"
+  value       = "cd ${path.module}/../ansible && ansible-playbook -i inventory.ini main.yml --verbose"
 }
