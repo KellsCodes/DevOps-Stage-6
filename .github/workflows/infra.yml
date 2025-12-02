@@ -254,10 +254,10 @@ jobs:
           from: "GitHub Actions <${{ secrets.EMAIL_FROM }}>"
           body: |
             Infrastructure deployment FAILED!
-            
+
             Workflow: Infrastructure-Terraform
             Status: FAILED ❌
-            
+
             Please review and fix the issues.
-            
+
             View details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
