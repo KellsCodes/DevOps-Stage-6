@@ -26,7 +26,7 @@ env:
   # 🔥 FIXED: Make duckDNS variables available everywhere
   DUCKDNS_DOMAIN: ${{ secrets.DUCKDNS_DOMAIN }}
   DUCKDNS_TOKEN: ${{ secrets.DUCKDNS_TOKEN }}
-
+  SSH_KEY_NAME: ${{ secrets.SSH_KEY_NAME }}
 jobs:
   plan:
     name: Terraform Plan
@@ -92,6 +92,7 @@ jobs:
           terraform plan \
             -var="duckdns_domain=${DUCKDNS_DOMAIN}" \
             -var="duckdns_token=${DUCKDNS_TOKEN}" \
+            -var="ssh_key_name=${SSH_KEY_NAME}" \
             -no-color \
             -out=tfplan
 
