@@ -41,9 +41,12 @@ echo "Starting Docker..."
 systemctl start docker
 systemctl enable docker
 
-# Install Git
-echo "Installing Git..."
-apt-get install -y git
+# Install Ansible
+echo "Installing Ansible..."
+apt-get install -y ansible
+
+# Verify Ansible installation
+ansible --version
 
 # Create app directory
 echo "Creating app directory..."
@@ -52,7 +55,7 @@ cd /home/ubuntu/apps
 
 # Clone the DevOps repository
 echo "Cloning DevOps Stage 6 repository..."
-git clone https://github.com/KellsCodes/DevOps-Stage-6.git || echo "Repository clone failed or already exists"
+git clone https://github.com/KellsCodes/DevOps-Stage-6.git DevOps-Stage-6 || echo "Repository clone failed or already exists"
 
 cd /home/ubuntu/apps/DevOps-Stage-6 || exit 1
 

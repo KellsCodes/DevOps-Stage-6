@@ -13,20 +13,25 @@ resource "local_file" "ansible_inventory" {
 # Run Ansible playbook after EC2 is ready
 resource "null_resource" "ansible_provisioner" {
   provisioner "remote-exec" {
-    inline = ["echo 'Wait for SSH to be ready'"]
+    inline = [
+      "echo 'Wait for SSH to be ready'",
+      "while ! command -v ansible-playbook &> /dev/null; do echo 'Waiting for Ansible...'; sleep 10; done",
+      "echo 'Ansible is ready'"
+    ]
 
     connection {
       type        = "ssh"
       user        = "ubuntu"
       private_key = file("~/.ssh/${var.ssh_key_name}.pem")
       host        = aws_eip.devops.public_ip
-      timeout     = "5m"
+      timeout     = "10m"
     }
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       cd ${path.module}/../ansible
+      sleep 30
       ansible-playbook \
         -i inventory.ini \
         -e "ansible_user=ubuntu" \

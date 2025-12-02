@@ -137,6 +137,13 @@ resource "aws_instance" "devops" {
   
   user_data = local.user_data
 
+  root_block_device {
+    volume_size           = 30
+    volume_type           = "gp3"
+    delete_on_termination = true
+    encrypted             = true
+  }
+
   # Ensure new instance is created before old one is destroyed
   lifecycle {
     create_before_destroy = true
