@@ -169,9 +169,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `🚨 Infrastructure Drift Detected (Run #${context.runId})`,
-              body: `Infrastructure drift detected.
-
-Review Terraform plan and approve if correct.`,
+              body: `Infrastructure drift detected. Review Terraform plan and approve if correct.`,
               labels: ['infrastructure', 'drift-detection', 'needs-approval']
             })
 
