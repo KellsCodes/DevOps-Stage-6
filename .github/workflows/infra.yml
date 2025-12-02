@@ -62,7 +62,8 @@ jobs:
         id: plan
         run: |
           cd infra/terraform
-          terraform plan -no-color -out=tfplan
+          # terraform plan -no-color -out=tfplan
+          terraform plan -var="duckdns_domain=${{ secrets.DUCKDNS_DOMAIN }}" -no-color -out=tfplan
           terraform show -no-color tfplan > plan_output.txt
           cat plan_output.txt
         continue-on-error: true
