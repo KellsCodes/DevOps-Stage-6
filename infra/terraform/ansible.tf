@@ -12,46 +12,47 @@ resource "local_file" "ansible_inventory" {
 
 # Run Ansible playbook after EC2 is ready
 resource "null_resource" "ansible_provisioner" {
+  # Optional: Verify SSH is reachable and Ansible is installed (remote side)
   provisioner "remote-exec" {
     inline = [
-      "echo 'Wait for SSH to be ready'",
-      "while ! command -v ansible-playbook &> /dev/null; do echo 'Waiting for Ansible...'; sleep 10; done",
-      "echo 'Ansible is ready'"
+      "echo 'Checking SSH connectivity and Ansible installation...'",
+      "while ! command -v ansible-playbook &> /dev/null; do echo 'Waiting for Ansible to be installed...'; sleep 10; done",
+      "echo 'Ansible is ready on remote host.'"
     ]
 
     connection {
       type        = "ssh"
       user        = "ubuntu"
-      private_key = var.ssh_private_key 
-      #file("~/.ssh/${var.ssh_key_name}.pem")
+      private_key = var.ssh_private_key
       host        = aws_eip.devops.public_ip
       timeout     = "10m"
     }
   }
 
+  # Run the Ansible playbook locally, but log output both locally and on remote server
   provisioner "local-exec" {
     command = <<-EOT
-      # start of workflow
+      set -e
       TMP_KEY_FILE=$(mktemp)
       echo "${var.ssh_private_key}" > $TMP_KEY_FILE
       chmod 600 $TMP_KEY_FILE
-      # end of workflow
 
       cd ${path.module}/../ansible
-      sleep 30
-      ansible-playbook \
-      	-i inventory.ini \
-      	-e "ansible_user=ubuntu" \
-      	-e "ansible_ssh_private_key_file=$TMP_KEY_FILE" \
-      	main.yml \
-	--verbose
+
+      # Create a remote log file on the EC2 instance
+      REMOTE_LOG="/home/ubuntu/ansible_run.log"
+      echo "Starting Ansible run at $(date)" | ssh -i $TMP_KEY_FILE ubuntu@${aws_eip.devops.public_ip} 'tee -a $REMOTE_LOG'
+
+      # Run Ansible playbook with SSH key, stream output to remote log and local stdout
+      ansible-playbook -i inventory.ini main.yml \
+        -e "ansible_user=ubuntu" \
+        -e "ansible_ssh_private_key_file=$TMP_KEY_FILE" \
+        --verbose | tee /tmp/ansible_local.log
+
+      # Copy local log to remote server for permanent record
+      scp -i $TMP_KEY_FILE /tmp/ansible_local.log ubuntu@${aws_eip.devops.public_ip}:$REMOTE_LOG
+
       rm -f $TMP_KEY_FILE
-      #ansible-playbook \
-       # -i inventory.ini \
-        # -e "ansible_user=ubuntu" \
-        # -e "ansible_ssh_private_key_file=~/.ssh/${var.ssh_key_name}.pem" \
-        # main.yml \
-       # --verbose
     EOT
 
     on_failure = continue
