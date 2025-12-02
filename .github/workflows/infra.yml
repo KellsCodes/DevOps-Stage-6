@@ -1,4 +1,4 @@
-name: 1-Infrastructure-Terraform
+name: 01-Infrastructure-Terraform
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     paths:
       - 'infra/terraform/**'
       - 'infra/ansible/**'
-      - '.github/workflows/infra.yml'
+      - '.github/workflows/1-infra.yml'
   pull_request:
     branches:
       - main
