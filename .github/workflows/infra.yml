@@ -23,6 +23,10 @@ env:
   AWS_REGION: us-east-1
   TERRAFORM_VERSION: 1.6.0
 
+  # 🔥 FIXED: Make duckDNS variables available everywhere
+  DUCKDNS_DOMAIN: ${{ secrets.DUCKDNS_DOMAIN }}
+  DUCKDNS_TOKEN: ${{ secrets.DUCKDNS_TOKEN }}
+
 jobs:
   plan:
     name: Terraform Plan
@@ -50,56 +54,60 @@ jobs:
         run: rm -f infra/terraform/tfplan
 
       - name: Terraform Init
-        run: |
-          cd infra/terraform
-          terraform init
+        working-directory: infra/terraform
+        run: terraform init
 
       - name: Terraform Format Check
-        run: |
-          cd infra/terraform
-          terraform fmt -check || true
+        working-directory: infra/terraform
+        run: terraform fmt -check || true
 
       - name: Terraform Validate
-        run: |
-          cd infra/terraform
-          terraform validate
+        working-directory: infra/terraform
+        run: terraform validate
 
-      # 🧹 FIX 1 — Auto-unlock stale DynamoDB lock
-      - name: Auto-remove stale Terraform lock
+      # ✅ FIX: Safe stale lock cleanup using DynamoDB API
+      - name: Auto-remove stale Terraform lock (DynamoDB)
         run: |
-          cd infra/terraform
-          LOCK_ID=$(terraform force-unlock -list 2>/dev/null | head -n 1 | awk '{print $2}')
-          if [ ! -z "$LOCK_ID" ]; then
-            echo "Found lock: $LOCK_ID — removing it"
-            terraform force-unlock -force $LOCK_ID || true
+          TABLE_NAME="terraform-locks"
+          LOCKS=$(aws dynamodb scan --table-name $TABLE_NAME --query "Items[*].LockID.S" --output text)
+
+          if [[ -z "$LOCKS" ]]; then
+            echo "No Terraform locks found."
           else
-            echo "No stale lock found"
+            echo "Found stale locks: $LOCKS"
+            for LOCK in $LOCKS; do
+              echo "Deleting lock: $LOCK"
+              aws dynamodb delete-item \
+                --table-name $TABLE_NAME \
+                --key "{\"LockID\": {\"S\": \"$LOCK\"}}"
+            done
+            echo "All stale locks removed."
           fi
 
-      # 🔐 FIX 2 — Add timeout to prevent infinite hang
       - name: Terraform Plan
         id: plan
-        timeout-minutes: 3
+        timeout-minutes: 10
+        working-directory: infra/terraform
         run: |
-          cd infra/terraform
-
           terraform plan \
-            -var="duckdns_domain=${{ secrets.DUCKDNS_DOMAIN }}" \
-            -no-color -out=tfplan
+            -var="duckdns_domain=${DUCKDNS_DOMAIN}" \
+            -var="duckdns_token=${DUCKDNS_TOKEN}" \
+            -no-color \
+            -out=tfplan
 
           terraform show -no-color tfplan > plan_output.txt
           cat plan_output.txt
 
       - name: Detect Drift
         id: detect_changes
+        working-directory: infra/terraform
         run: |
-          cd infra/terraform
           if terraform show tfplan | grep -q "No changes"; then
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "::notice::✅ No infrastructure changes detected"
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
-            echo "::warning::⚠️ Infrastructure changes detected - drift found!"
+            echo "::warning::Infrastructure changes detected - drift found!"
           fi
 
       - name: Save plan artifact
@@ -202,14 +210,12 @@ jobs:
           path: infra/terraform/
 
       - name: Terraform Init
-        run: |
-          cd infra/terraform
-          terraform init
+        working-directory: infra/terraform
+        run: terraform init
 
       - name: Terraform Apply
-        run: |
-          cd infra/terraform
-          terraform apply -no-color tfplan
+        working-directory: infra/terraform
+        run: terraform apply -no-color tfplan
 
       - name: Send success email
         if: success()
