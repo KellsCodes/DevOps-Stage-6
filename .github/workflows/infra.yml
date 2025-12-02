@@ -58,6 +58,9 @@ jobs:
           cd infra/terraform
           terraform validate
 
+      - name: Clean old plan files
+        run: rm -f infra/terraform/tfplan
+
       - name: Terraform Plan
         id: plan
         run: |
