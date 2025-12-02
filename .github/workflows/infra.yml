@@ -1,4 +1,4 @@
-name: 01-Infrastructure-Terraform
+name: 1-Infrastructure-Terraform
 
 on:
   push:
@@ -181,13 +181,9 @@ jobs:
 
   apply:
     name: Terraform Apply
-    needs: [plan, drift-notification]
+    needs: plan
     runs-on: ubuntu-latest
     if: needs.plan.outputs.has_changes == 'true'
-    
-    environment:
-      name: production
-      require-review: true
     
     steps:
       - name: Checkout code
