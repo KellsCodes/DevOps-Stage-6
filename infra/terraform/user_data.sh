@@ -36,10 +36,17 @@ echo "Installing Docker Compose..."
 curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 chmod +x /usr/local/bin/docker-compose
 
-# Start Docker
-echo "Starting Docker..."
-systemctl start docker
-systemctl enable docker
+# Add ubuntu user to docker group
+echo "Adding ubuntu user to docker group..."
+usermod -aG docker ubuntu
+newgrp docker
+
+# Set docker socket permissions
+chmod 666 /var/run/docker.sock
+
+# Verify Docker works
+echo "Verifying Docker..."
+docker ps || true
 
 # Install Ansible
 echo "Installing Ansible..."
