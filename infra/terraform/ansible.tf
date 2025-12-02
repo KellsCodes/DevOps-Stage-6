@@ -22,7 +22,8 @@ resource "null_resource" "ansible_provisioner" {
     connection {
       type        = "ssh"
       user        = "ubuntu"
-      private_key = file("~/.ssh/${var.ssh_key_name}.pem")
+      private_key = var.ssh_private_key 
+      #file("~/.ssh/${var.ssh_key_name}.pem")
       host        = aws_eip.devops.public_ip
       timeout     = "10m"
     }
@@ -30,14 +31,27 @@ resource "null_resource" "ansible_provisioner" {
 
   provisioner "local-exec" {
     command = <<-EOT
+      # start of workflow
+      TMP_KEY_FILE=$(mktemp)
+      echo "${var.ssh_private_key}" > $TMP_KEY_FILE
+      chmod 600 $TMP_KEY_FILE
+      # end of workflow
+
       cd ${path.module}/../ansible
       sleep 30
       ansible-playbook \
-        -i inventory.ini \
-        -e "ansible_user=ubuntu" \
-        -e "ansible_ssh_private_key_file=~/.ssh/${var.ssh_key_name}.pem" \
-        main.yml \
-        --verbose
+      	-i inventory.ini \
+      	-e "ansible_user=ubuntu" \
+      	-e "ansible_ssh_private_key_file=$TMP_KEY_FILE" \
+      	main.yml \
+	--verbose
+      rm -f $TMP_KEY_FILE
+      #ansible-playbook \
+       # -i inventory.ini \
+        # -e "ansible_user=ubuntu" \
+        # -e "ansible_ssh_private_key_file=~/.ssh/${var.ssh_key_name}.pem" \
+        # main.yml \
+       # --verbose
     EOT
 
     on_failure = continue

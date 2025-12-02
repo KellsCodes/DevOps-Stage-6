@@ -34,6 +34,12 @@ variable "ssh_key_name" {
   # You'll need to create this key pair in AWS beforehand
 }
 
+variable "ssh_private_key" {
+  type        = string
+  sensitive   = true
+}
+
+
 variable "allowed_ssh_cidr" {
   description = "CIDR block allowed for SSH access"
   type        = string

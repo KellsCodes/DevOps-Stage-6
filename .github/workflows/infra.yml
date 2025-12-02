@@ -90,6 +90,7 @@ jobs:
         working-directory: infra/terraform
         run: |
           terraform plan \
+            -var="ssh_private_key=${{ secrets.SSH_PRIVATE_KEY }}" \
             -var="duckdns_domain=${DUCKDNS_DOMAIN}" \
             -var="duckdns_token=${DUCKDNS_TOKEN}" \
             -var="ssh_key_name=${SSH_KEY_NAME}" \
