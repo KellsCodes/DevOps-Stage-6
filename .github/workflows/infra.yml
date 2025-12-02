@@ -1,5 +1,9 @@
 name: 1-Infrastructure-Terraform
 
+concurrency:
+  group: terraform-infra
+  cancel-in-progress: true
+
 on:
   push:
     branches:
@@ -60,11 +64,29 @@ jobs:
           cd infra/terraform
           terraform validate
 
-      - name: Terraform Plan
-        id: plan
+      # 🧹 FIX 1 — Auto-unlock stale DynamoDB lock
+      - name: Auto-remove stale Terraform lock
         run: |
           cd infra/terraform
-          terraform plan -var="duckdns_domain=${{ secrets.DUCKDNS_DOMAIN }}" -no-color -out=tfplan
+          LOCK_ID=$(terraform force-unlock -list 2>/dev/null | head -n 1 | awk '{print $2}')
+          if [ ! -z "$LOCK_ID" ]; then
+            echo "Found lock: $LOCK_ID — removing it"
+            terraform force-unlock -force $LOCK_ID || true
+          else
+            echo "No stale lock found"
+          fi
+
+      # 🔐 FIX 2 — Add timeout to prevent infinite hang
+      - name: Terraform Plan
+        id: plan
+        timeout-minutes: 3
+        run: |
+          cd infra/terraform
+
+          terraform plan \
+            -var="duckdns_domain=${{ secrets.DUCKDNS_DOMAIN }}" \
+            -no-color -out=tfplan
+
           terraform show -no-color tfplan > plan_output.txt
           cat plan_output.txt
 
@@ -135,39 +157,21 @@ jobs:
             Commit: ${{ github.sha }}
             Author: ${{ github.actor }}
 
-            Changes detected in:
-            - infra/terraform/ OR
-            - infra/ansible/
-
             Action Required:
-            1. Review the terraform plan at: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            2. Approve or reject the infrastructure changes
-            3. If approved, the terraform apply will proceed
+            1. Review the terraform plan
+            2. Approve or reject the changes
 
-            ⚠️ NO AUTOMATIC APPLY - MANUAL APPROVAL REQUIRED
-
-      # Optional GitHub Issue creation, only if Issues are enabled
       - name: Create GitHub Issue for approval
-        if: ${{ github.repository_owner != '' }}
         uses: actions/github-script@v7
         with:
           script: |
             github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `🚨 Infrastructure Drift Detected - Approval Required (Run #${context.runId})`,
-              body: `Infrastructure drift has been detected in this commit!
+              title: `🚨 Infrastructure Drift Detected (Run #${context.runId})`,
+              body: `Infrastructure drift detected.
 
-              **Workflow**: Infrastructure-Terraform
-              **Commit**: ${{ github.sha }}
-              **Author**: @${{ github.actor }}
-
-              ## Required Actions
-              1. Review the terraform plan
-              2. Comment with \`/approve\` to apply changes
-              3. Or comment with \`/reject\` to skip this run
-
-              [View Workflow Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`,
+Review Terraform plan and approve if correct.`,
               labels: ['infrastructure', 'drift-detection', 'needs-approval']
             })
 
@@ -223,14 +227,6 @@ jobs:
           body: |
             Infrastructure deployment completed successfully!
 
-            Workflow: Infrastructure-Terraform
-            Status: SUCCESS ✅
-
-            Changes applied:
-            - Terraform resources updated
-            - Ansible provisioning completed
-            - Application deployed
-
       - name: Send failure email
         if: failure()
         uses: dawidd6/action-send-mail@v3
@@ -244,8 +240,3 @@ jobs:
           from: "GitHub Actions <${{ secrets.EMAIL_FROM }}>"
           body: |
             Infrastructure deployment FAILED!
-
-            Workflow: Infrastructure-Terraform
-            Status: FAILED ❌
-
-            Please review and fix the issues.
