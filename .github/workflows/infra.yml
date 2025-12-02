@@ -81,14 +81,14 @@ jobs:
           fi
 
       - name: Save plan artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: tfplan
           path: infra/terraform/tfplan
           retention-days: 1
 
       - name: Save plan output
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: plan_output
           path: infra/terraform/plan_output.txt
@@ -125,7 +125,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Send drift detection email
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v4
         with:
           server_address: ${{ secrets.EMAIL_SERVER }}
           server_port: ${{ secrets.EMAIL_PORT }}
