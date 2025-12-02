@@ -202,6 +202,10 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Clean old plan files
+        run: |
+          rm -f infra/terraform/tfplan
+
       - name: Download plan artifact
         uses: actions/download-artifact@v4
         with:
