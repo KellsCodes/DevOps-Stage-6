@@ -35,6 +35,7 @@ variable "ssh_key_name" {
 }
 
 variable "ssh_private_key" {
+  description = "Private SSH key for connecting to EC2 instances"
   type        = string
   sensitive   = true
 }
