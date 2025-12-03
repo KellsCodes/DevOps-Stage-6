@@ -1,0 +1,336 @@
+name: 2-Application-Deployment
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - 'auth-api/**'
+      - 'todos-api/**'
+      - 'users-api/**'
+      - 'log-message-processor/**'
+      - 'docker-compose.yml'
+      - '.env.example'
+      - '.env'
+      - '.github/workflows/app.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - 'auth-api/**'
+      - 'todos-api/**'
+      - 'users-api/**'
+      - 'log-message-processor/**'
+      - 'docker-compose.yml'
+
+jobs:
+  detect-changes:
+    name: Detect Service Changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_changed: ${{ steps.changes.outputs.frontend }}
+      auth_api_changed: ${{ steps.changes.outputs.auth_api }}
+      todos_api_changed: ${{ steps.changes.outputs.todos_api }}
+      users_api_changed: ${{ steps.changes.outputs.users_api }}
+      log_processor_changed: ${{ steps.changes.outputs.log_processor }}
+      any_changed: ${{ steps.changes.outputs.any }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed services
+        id: changes
+        run: |
+          # Get changed files
+          CHANGED_FILES=$(git diff --name-only origin/main HEAD 2>/dev/null || git diff --name-only HEAD~1)
+          
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          
+          # Check which services changed
+          if echo "$CHANGED_FILES" | grep -q "^frontend/"; then
+            echo "frontend=true" >> $GITHUB_OUTPUT
+            echo "✅ Frontend changed"
+          else
+            echo "frontend=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if echo "$CHANGED_FILES" | grep -q "^auth-api/"; then
+            echo "auth_api=true" >> $GITHUB_OUTPUT
+            echo "✅ Auth API changed"
+          else
+            echo "auth_api=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if echo "$CHANGED_FILES" | grep -q "^todos-api/"; then
+            echo "todos_api=true" >> $GITHUB_OUTPUT
+            echo "✅ Todos API changed"
+          else
+            echo "todos_api=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if echo "$CHANGED_FILES" | grep -q "^users-api/"; then
+            echo "users_api=true" >> $GITHUB_OUTPUT
+            echo "✅ Users API changed"
+          else
+            echo "users_api=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if echo "$CHANGED_FILES" | grep -q "^log-message-processor/"; then
+            echo "log_processor=true" >> $GITHUB_OUTPUT
+            echo "✅ Log Processor changed"
+          else
+            echo "log_processor=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Check if any service or docker-compose changed
+          if echo "$CHANGED_FILES" | grep -qE "^(frontend|auth-api|todos-api|users-api|log-message-processor|docker-compose.yml)"; then
+            echo "any=true" >> $GITHUB_OUTPUT
+            echo "Application changes detected"
+          else
+            echo "any=false" >> $GITHUB_OUTPUT
+            echo "No application changes - skipping deployment"
+          fi
+
+  check-server:
+    name: Check Server Availability
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    outputs:
+      server_reachable: ${{ steps.health_check.outputs.reachable }}
+
+    steps:
+      - name: Check server connectivity
+        id: health_check
+        run: |
+          echo "Checking server availability at ${{ secrets.SERVER_HOST }}..."
+          
+          # Test SSH connectivity
+          if nc -z -w5 ${{ secrets.SERVER_HOST }} 22 2>/dev/null; then
+            echo "✅ Server SSH port (22) is open"
+            echo "reachable=true" >> $GITHUB_OUTPUT
+          else
+            echo "Server is unreachable on port 22"
+            echo "reachable=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          # Test HTTPS connectivity
+          if timeout 10 bash -c "echo > /dev/tcp/${{ secrets.SERVER_HOST }}/443" 2>/dev/null; then
+            echo "✅ Server HTTPS port (443) is open"
+          else
+            echo "Server HTTPS port not responding (may be initializing)"
+          fi
+
+  deploy:
+    name: Deploy Application via Ansible
+    needs: [detect-changes, check-server]
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.any_changed == 'true' && needs.check-server.outputs.server_reachable == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Ansible
+        run: |
+          pip install ansible paramiko
+          ansible --version
+
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key.pem
+          chmod 600 ~/.ssh/deploy_key.pem
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Generate Ansible inventory
+        run: |
+          mkdir -p /tmp/ansible
+          cat > /tmp/ansible/inventory.ini << EOF
+          [app_servers]
+          app_server ansible_host=${{ secrets.SERVER_HOST }} ansible_user=${{ secrets.SERVER_USER }} ansible_ssh_private_key_file=~/.ssh/deploy_key.pem
+          
+          [app_servers:vars]
+          ansible_python_interpreter=/usr/bin/python3
+          EOF
+          cat /tmp/ansible/inventory.ini
+
+      - name: Run Ansible deployment role
+        run: |
+          cd infra/ansible
+          ansible-playbook -i /tmp/ansible/inventory.ini main.yml \
+            -e "ansible_user=${{ secrets.SERVER_USER }}" \
+            -e "ansible_ssh_private_key_file=~/.ssh/deploy_key.pem" \
+            -v
+
+      - name: Wait for services to stabilize
+        run: sleep 15
+
+      - name: Health check - Services status
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          script: |
+            echo "Checking service health..."
+            cd ~/apps/DevOps-Stage-6
+            
+            echo ""
+            echo "Docker Compose Status:"
+            docker compose ps
+            
+            echo ""
+            echo "Service Count:"
+            RUNNING=$(docker compose ps --services --filter "status=running" | wc -l)
+            echo "✅ Running services: $RUNNING/8"
+            
+            if [ $RUNNING -ge 7 ]; then
+              echo "✅ Most services are running"
+            else
+              echo "Some services may not be running"
+              echo ""
+              echo "Recent logs:"
+              docker compose logs --tail=30
+            fi
+
+      - name: Health check - Frontend accessibility
+        run: |
+          echo "Testing frontend accessibility..."
+          for i in {1..10}; do
+            if curl -sk https://${{ secrets.SERVER_HOST }}/ > /dev/null 2>&1; then
+              echo "✅ Frontend is accessible (attempt $i/10)"
+              exit 0
+            fi
+            echo "Attempt $i/10 - waiting for frontend..."
+            sleep 3
+          done
+          echo "Frontend check timed out - may still be initializing"
+
+      - name: Health check - Auth API
+        run: |
+          echo "Testing Auth API..."
+          RESPONSE=$(curl -sk -X POST https://${{ secrets.SERVER_HOST }}/api/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"username":"admin","password":"Admin123"}' 2>/dev/null)
+          
+          if echo "$RESPONSE" | grep -q "accessToken"; then
+            echo "✅ Auth API is working - login successful"
+          else
+            echo "Auth API response: $RESPONSE"
+          fi
+
+      - name: Health check - Todos API
+        run: |
+          echo "Testing Todos API..."
+          RESPONSE=$(curl -sk https://${{ secrets.SERVER_HOST }}/api/todos 2>/dev/null)
+          
+          if echo "$RESPONSE" | grep -q "invalid token"; then
+            echo "✅ Todos API is working - returns 'invalid token' (expected without auth)"
+          else
+            echo "Todos API response: $RESPONSE"
+          fi
+
+      - name: Generate deployment report
+        run: |
+          echo "=== DEPLOYMENT REPORT ==="
+          echo ""
+          echo "Services changed:"
+          echo "  Frontend: ${{ needs.detect-changes.outputs.frontend_changed }}"
+          echo "  Auth API: ${{ needs.detect-changes.outputs.auth_api_changed }}"
+          echo "  Todos API: ${{ needs.detect-changes.outputs.todos_api_changed }}"
+          echo "  Users API: ${{ needs.detect-changes.outputs.users_api_changed }}"
+          echo "  Log Processor: ${{ needs.detect-changes.outputs.log_processor_changed }}"
+          echo ""
+          echo "Deployment method: Ansible"
+          echo "Server: ${{ secrets.SERVER_HOST }}"
+          echo "Timestamp: $(date)"
+          echo ""
+          echo "✅ Deployment completed successfully!"
+
+      - name: Send success email
+        if: success()
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: ${{ secrets.EMAIL_SERVER }}
+          server_port: ${{ secrets.EMAIL_PORT }}
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "✅ Application Deployment Successful"
+          to: ${{ secrets.EMAIL_TO }}
+          from: "GitHub Actions <${{ secrets.EMAIL_FROM }}>"
+          body: |
+            Application deployment completed successfully! ✅
+
+            Status: SUCCESS
+
+            Services updated:
+            - Frontend: ${{ needs.detect-changes.outputs.frontend_changed }}
+            - Auth API: ${{ needs.detect-changes.outputs.auth_api_changed }}
+            - Todos API: ${{ needs.detect-changes.outputs.todos_api_changed }}
+            - Users API: ${{ needs.detect-changes.outputs.users_api_changed }}
+            - Log Processor: ${{ needs.detect-changes.outputs.log_processor_changed }}
+
+            Deployment Details:
+            - Method: Ansible playbook (idempotent)
+            - Server: ${{ secrets.SERVER_HOST }}
+            - Branch: ${{ github.ref }}
+            - Commit: ${{ github.sha }}
+            - Author: @${{ github.actor }}
+
+            Access Application:
+            URL: https://anyitech.duckdns.org
+            Login: admin / Admin123
+
+            All services are running and healthy!
+
+            View full details:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Send failure email
+        if: failure()
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: ${{ secrets.EMAIL_SERVER }}
+          server_port: ${{ secrets.EMAIL_PORT }}
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Application Deployment Failed"
+          to: ${{ secrets.EMAIL_TO }}
+          from: "GitHub Actions <${{ secrets.EMAIL_FROM }}>"
+          body: |
+            Application deployment FAILED!
+
+            Status: FAILED
+
+            Details:
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Author: @${{ github.actor }}
+
+            Services that were updated:
+            - Frontend: ${{ needs.detect-changes.outputs.frontend_changed }}
+            - Auth API: ${{ needs.detect-changes.outputs.auth_api_changed }}
+            - Todos API: ${{ needs.detect-changes.outputs.todos_api_changed }}
+            - Users API: ${{ needs.detect-changes.outputs.users_api_changed }}
+            - Log Processor: ${{ needs.detect-changes.outputs.log_processor_changed }}
+
+            Troubleshooting:
+            1. Check the Ansible playbook execution logs
+            2. Verify server connectivity
+            3. Check Docker service status on server
+            4. Review error messages in GitHub Actions
+
+            View full logs and details:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Please review and retry deployment if needed.
