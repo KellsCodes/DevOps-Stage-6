@@ -1,0 +1,6 @@
+terraform plan \
+  -var="ssh_key_name=hng13" \
+  -var="ssh_private_key=$(cat ~/.ssh/hng13.pem)" \
+  -var="duckdns_domain=anyitech.duckdns.org" \
+  -var="duckdns_token=25df1d75-8a2f-4855-a686-32d12a82b8b4" \
+  -out=tfplan
