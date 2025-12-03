@@ -1,5 +1,5 @@
 # Stage 1: Build the Vue app
-FROM node:12-buster AS builder
+FROM node:18-alpine AS builder
 
 WORKDIR /app
 
