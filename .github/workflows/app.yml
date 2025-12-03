@@ -12,7 +12,6 @@ on:
       - 'log-message-processor/**'
       - 'docker-compose.yml'
       - '.env.example'
-      - '.env'
       - '.github/workflows/app.yml'
   pull_request:
     branches:
@@ -46,11 +45,19 @@ jobs:
       - name: Detect changed services
         id: changes
         run: |
-          # Get changed files
-          CHANGED_FILES=$(git diff --name-only origin/main HEAD 2>/dev/null || git diff --name-only HEAD~1)
+          # Get changed files - try multiple methods
+          CHANGED_FILES=$(git diff --name-only origin/main HEAD 2>/dev/null || git diff --name-only HEAD~1 2>/dev/null || git diff --name-only)
+          
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No changes detected using standard git diff"
+            CHANGED_FILES=$(git log -1 --name-only --pretty=format: 2>/dev/null)
+          fi
           
           echo "Changed files:"
           echo "$CHANGED_FILES"
+          echo ""
+          echo "DEBUG: Full output:"
+          git diff --name-only HEAD~1 2>/dev/null || echo "git diff failed"
           
           # Check which services changed
           if echo "$CHANGED_FILES" | grep -q "^frontend/"; then
@@ -89,7 +96,7 @@ jobs:
           fi
           
           # Check if any service or docker-compose changed
-          if echo "$CHANGED_FILES" | grep -qE "^(frontend|auth-api|todos-api|users-api|log-message-processor|docker-compose.yml)"; then
+          if echo "$CHANGED_FILES" | grep -qE "^(frontend|auth-api|todos-api|users-api|log-message-processor|docker-compose\.yml)"; then
             echo "any=true" >> $GITHUB_OUTPUT
             echo "Application changes detected"
           else
