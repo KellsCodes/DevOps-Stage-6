@@ -31,20 +31,23 @@ variable "ami_owner" {
 variable "ssh_key_name" {
   description = "SSH key pair name for EC2 access"
   type        = string
-  # You'll need to create this key pair in AWS beforehand
+  default     = "hng13"
+  # Created in AWS beforehand
 }
 
 variable "ssh_private_key" {
-  description = "Private SSH key for connecting to EC2 instances"
+  description = "Private SSH key for connecting to EC2 instances (used in CI/CD)"
   type        = string
   sensitive   = true
+  default     = ""
+  # Leave empty for local runs (Ansible uses ~/.ssh/hng13.pem)
+  # CI/CD provides this via GitHub secrets
 }
-
 
 variable "allowed_ssh_cidr" {
   description = "CIDR block allowed for SSH access"
   type        = string
-  default     = "0.0.0.0/0"  # Change this to your IP for security
+  default     = "0.0.0.0/0"
 }
 
 variable "environment" {
@@ -56,12 +59,13 @@ variable "environment" {
 variable "duckdns_domain" {
   description = "DuckDNS domain name"
   type        = string
-  # Example: anyitech.duckdns.org
+  default     = "anyitech.duckdns.org"
 }
 
 variable "duckdns_token" {
   description = "DuckDNS token for updating DNS"
   type        = string
   sensitive   = true
-  # Get this from https://www.duckdns.org
+  default     = ""
+  # Provide via -var or GitHub secrets
 }
