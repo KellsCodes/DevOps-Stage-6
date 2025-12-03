@@ -23,10 +23,10 @@ env:
   AWS_REGION: us-east-1
   TERRAFORM_VERSION: 1.6.0
 
-  # 🔥 FIXED: Make duckDNS variables available everywhere
   DUCKDNS_DOMAIN: ${{ secrets.DUCKDNS_DOMAIN }}
   DUCKDNS_TOKEN: ${{ secrets.DUCKDNS_TOKEN }}
   SSH_KEY_NAME: ${{ secrets.SSH_KEY_NAME }}
+
 jobs:
   plan:
     name: Terraform Plan
@@ -65,7 +65,6 @@ jobs:
         working-directory: infra/terraform
         run: terraform validate
 
-      # ✅ FIX: Safe stale lock cleanup using DynamoDB API
       - name: Auto-remove stale Terraform lock (DynamoDB)
         run: |
           TABLE_NAME="terraform-locks"
@@ -76,7 +75,6 @@ jobs:
           else
             echo "Found stale locks: $LOCKS"
             for LOCK in $LOCKS; do
-              echo "Deleting lock: $LOCK"
               aws dynamodb delete-item \
                 --table-name $TABLE_NAME \
                 --key "{\"LockID\": {\"S\": \"$LOCK\"}}"
@@ -106,10 +104,10 @@ jobs:
         run: |
           if terraform show tfplan | grep -q "No changes"; then
             echo "has_changes=false" >> $GITHUB_OUTPUT
-            echo "::notice::✅ No infrastructure changes detected"
+            echo "::notice::✅ No infrastructure changes detected - will auto-apply"
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
-            echo "::warning::Infrastructure changes detected - drift found!"
+            echo "::warning::⚠️ Infrastructure drift found - manual approval required!"
           fi
 
       - name: Save plan artifact
@@ -138,6 +136,74 @@ jobs:
               body: `## Terraform Plan Output\n\`\`\`\n${plan}\n\`\`\``
             })
 
+  ###########################################################
+  # AUTO-APPLY JOB (No drift - automatic)
+  ###########################################################
+  auto-apply:
+    name: Auto-Apply (No Changes)
+    needs: plan
+    runs-on: ubuntu-latest
+    if: needs.plan.outputs.has_changes == 'false' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: infra/terraform/
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init
+
+      - name: Terraform Apply (No changes - idempotent)
+        working-directory: infra/terraform
+        run: terraform apply -no-color tfplan
+
+      - name: Send no-changes email
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: ${{ secrets.EMAIL_SERVER }}
+          server_port: ${{ secrets.EMAIL_PORT }}
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "✅ Terraform Plan - No Changes (Auto-applied)"
+          to: ${{ secrets.EMAIL_TO }}
+          from: "GitHub Actions <${{ secrets.EMAIL_FROM }}>"
+          body: |
+            Infrastructure check completed successfully!
+
+            📋 Status: ✅ NO CHANGES DETECTED
+            
+            🔄 Action: Auto-applied (idempotent)
+            
+            This means:
+            - Current infrastructure matches desired state
+            - No resources were created, modified, or destroyed
+            - All resources are up-to-date
+            
+            ✨ Everything is in sync!
+            
+            📊 View details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+  ###########################################################
+  # DRIFT NOTIFICATION JOB (Has drift - needs approval)
+  ###########################################################
   drift-notification:
     name: Drift Detection & Notification
     needs: plan
@@ -161,15 +227,25 @@ jobs:
           body: |
             Infrastructure drift has been detected!
 
-            Workflow: Infrastructure-Terraform
+            📋 Status: ⚠️ CHANGES DETECTED
+
+            🔄 Action Required: Manual approval needed before applying changes
+
+            📊 Workflow Details:
             Repository: ${{ github.repository }}
             Branch: ${{ github.ref }}
             Commit: ${{ github.sha }}
-            Author: ${{ github.actor }}
+            Author: @${{ github.actor }}
 
-            Action Required:
-            1. Review the terraform plan
-            2. Approve or reject the changes
+            ✅ Next Steps:
+            1. Review the Terraform plan in GitHub Actions
+            2. Go to: Settings → Environments → production
+            3. Approve the deployment when ready
+            4. Changes will be applied immediately after approval
+
+            ⏸️ This workflow is paused and waiting for your approval.
+
+            🔗 View workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: Create GitHub Issue for approval
         uses: actions/github-script@v7
@@ -179,15 +255,61 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `🚨 Infrastructure Drift Detected (Run #${context.runId})`,
-              body: `Infrastructure drift detected. Review Terraform plan and approve if correct.`,
+              body: `Infrastructure drift has been detected in this commit!
+
+              **Status**: ⚠️ CHANGES DETECTED
+              **Action**: Manual approval required
+
+              **Commit**: ${{ github.sha }}
+              **Author**: @${{ github.actor }}
+
+              ## Required Actions
+              1. Review the Terraform plan
+              2. Go to: Settings → Environments → production
+              3. Approve or reject the deployment
+              4. Changes will apply immediately after approval
+
+              [View Workflow Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+              **Labels**: infrastructure, drift-detection, needs-approval`,
               labels: ['infrastructure', 'drift-detection', 'needs-approval']
             })
 
+  ###########################################################
+  # MANUAL APPROVAL JOB (Waits for approval)
+  ###########################################################
+  drift-approval:
+    name: Manual Approval Required
+    needs: drift-notification
+    runs-on: ubuntu-latest
+    if: needs.plan.outputs.has_changes == 'true' && github.event_name == 'push'
+
+    environment:
+      name: production
+      url: https://anyitech.duckdns.org
+
+    steps:
+      - name: ⏸️ Waiting for manual approval
+        run: |
+          echo "⏸️  Workflow paused - waiting for manual approval"
+          echo ""
+          echo "📍 To approve this deployment:"
+          echo "1. Go to: Settings → Environments → production"
+          echo "2. Review the deployment"
+          echo "3. Click 'Approve and deploy'"
+          echo ""
+          echo "The Terraform apply will run automatically after approval."
+
+  ###########################################################
+  # APPLY JOB (Runs after approval)
+  ###########################################################
   apply:
     name: Terraform Apply
-    needs: plan
+    needs:
+      - plan
+      - drift-approval
     runs-on: ubuntu-latest
-    if: needs.plan.outputs.has_changes == 'true'
+    if: needs.plan.outputs.has_changes == 'true' && needs.drift-approval.result == 'success'
 
     steps:
       - name: Checkout code
@@ -221,7 +343,7 @@ jobs:
 
       - name: Send success email
         if: success()
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v4
         with:
           server_address: ${{ secrets.EMAIL_SERVER }}
           server_port: ${{ secrets.EMAIL_PORT }}
@@ -231,11 +353,33 @@ jobs:
           to: ${{ secrets.EMAIL_TO }}
           from: "GitHub Actions <${{ secrets.EMAIL_FROM }}>"
           body: |
-            Infrastructure deployment completed successfully!
+            Infrastructure deployment completed successfully! ✅
+
+            🎉 Status: SUCCESS
+
+            📋 Details:
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Workflow: Infrastructure-Terraform
+
+            🚀 What was deployed:
+            - Infrastructure provisioned/updated
+            - Security groups configured
+            - Ansible inventory generated
+            - Ansible provisioning completed
+            - Application deployed
+
+            🌐 Access your application:
+            URL: https://anyitech.duckdns.org
+            
+            ✨ All resources are now in sync!
+
+            📊 View details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: Send failure email
         if: failure()
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v4
         with:
           server_address: ${{ secrets.EMAIL_SERVER }}
           server_port: ${{ secrets.EMAIL_PORT }}
@@ -245,4 +389,20 @@ jobs:
           to: ${{ secrets.EMAIL_TO }}
           from: "GitHub Actions <${{ secrets.EMAIL_FROM }}>"
           body: |
-            Infrastructure deployment FAILED!
+            Infrastructure deployment FAILED! ❌
+
+            ⚠️ Status: FAILED
+
+            📋 Details:
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Workflow: Infrastructure-Terraform
+
+            🔧 Troubleshooting:
+            1. Check the Terraform apply logs
+            2. Verify AWS credentials are correct
+            3. Check if resources exist and are in valid state
+            4. Review error messages in GitHub Actions
+
+            📊 View full logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
